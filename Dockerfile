@@ -1,4 +1,4 @@
-FROM nginx:1.21.6-alpine
+FROM nginx:1.30.6-alpine3.24
 
 EXPOSE 8000
 CMD ["/sbin/entrypoint.sh"]
@@ -9,73 +9,55 @@ ARG archive_url
 ENV cachet_ver ${cachet_ver}
 ENV archive_url ${archive_url:-https://github.com/klarrio/Cachet/archive/refs/tags/${cachet_ver}.tar.gz}
 
-ENV COMPOSER_VERSION 2.2.7
+ENV COMPOSER_VERSION 2.8.12
 
 RUN apk add --no-cache --update \
     postgresql-client \
-    postgresql \
     mysql-client \
-    php7 \
-    php7-redis \
-    php7-apcu \
-    php7-bcmath \
-    php7-dom \
-    php7-ctype \
-    php7-curl \
-    php7-fpm \
-    php7-fileinfo \
-    php7-gd \
-    php7-iconv \
-    php7-intl \
-    php7-json \
-    sqlite \
-    php7-mbstring \
-    php7-mcrypt \
-    php7-mysqlnd \
-    php7-opcache \
-    php7-openssl \
-    php7-pdo \
-    php7-pdo_mysql \
-    php7-pdo_pgsql \
-    php7-pdo_sqlite \
-    php7-phar \
-    php7-posix \
-    php7-session \
-    php7-sqlite3 \
-    php7-simplexml \
-    php7-soap \
-    php7-xml \
-    php7-xmlwriter \
-    php7-zip \
-    php7-zlib \
-    php7-tokenizer \
-    wget sqlite git bash grep \
-    supervisor
-
-# apk add --no-cache curl~=7.79.0
-RUN apk add --no-cache --repository http://dl-cdn.alpinelinux.org/alpine/v3.16/main/ \
-    curl=8.0.1-r0 \
-    libxml2=2.9.14-r2 \
-    libcrypto1.1=1.1.1t-r3 \
-    libssl1.1=1.1.1t-r3 \
-    libretls=3.5.2-r0 \
-    libxslt=1.1.35-r0 \
-    freetype=2.12.1-r0 \
-    libcurl=8.0.1-r0 \
-    xz-libs=5.2.5-r1 \
-    pcre2=10.40-r0 \
-    zlib=1.2.12-r3
+    php83 \
+    php83-pecl-redis \
+    php83-pecl-apcu \
+    php83-bcmath \
+    php83-dom \
+    php83-ctype \
+    php83-curl \
+    php83-fpm \
+    php83-fileinfo \
+    php83-gd \
+    php83-iconv \
+    php83-intl \
+    php83-mbstring \
+    php83-mysqlnd \
+    php83-opcache \
+    php83-openssl \
+    php83-pdo \
+    php83-pdo_mysql \
+    php83-pdo_pgsql \
+    php83-pdo_sqlite \
+    php83-phar \
+    php83-posix \
+    php83-session \
+    php83-sqlite3 \
+    php83-simplexml \
+    php83-soap \
+    php83-xml \
+    php83-xmlwriter \
+    php83-zip \
+    php83-tokenizer \
+    php83-sodium \
+    curl sqlite wget git bash grep supervisor \
+ && ln -sf /usr/bin/php83 /usr/bin/php
 
 # forward request and error logs to docker log collector
 RUN ln -sf /dev/stdout /var/log/nginx/access.log && \
     ln -sf /dev/stderr /var/log/nginx/error.log && \
-    ln -sf /dev/stdout /var/log/php7/error.log && \
-    ln -sf /dev/stderr /var/log/php7/error.log
+    ln -sf /dev/stdout /var/log/php83/error.log && \
+    ln -sf /dev/stderr /var/log/php83/error.log
 
 RUN adduser -S -s /bin/bash -u 1001 -G root www-data
 
 RUN touch /var/run/nginx.pid && \
-    chown -R www-data:root /var/run/nginx.pid /etc/php7/php-fpm.d
+    chown -R www-data:root /var/run/nginx.pid /etc/php83/php-fpm.d
 
 RUN mkdir -p /var/www/html && \
     mkdir -p /usr/share/nginx/cache && \
@@ -98,17 +80,23 @@ RUN wget ${archive_url} && \
     chown -R www-data:root /var/www/html && \
     rm -r ${cachet_ver}.tar.gz
 
-COPY conf/php-fpm-pool.conf /etc/php7/php-fpm.d/www.conf
+COPY conf/php-fpm-pool.conf /etc/php83/php-fpm.d/www.conf
 COPY conf/supervisord.conf /etc/supervisor/supervisord.conf
 COPY conf/nginx.conf /etc/nginx/nginx.conf
 COPY conf/nginx-site.conf /etc/nginx/conf.d/default.conf
 COPY conf/.env.docker /var/www/html/.env
 COPY entrypoint.sh /sbin/entrypoint.sh
 
-RUN php /bin/composer.phar install --ignore-platform-reqs && \
+# Cachet's locked dependencies target PHP 7.4:
+# - doctrine/dbal 2.6 is incompatible with PHP 8, bump to 2.13
+# - Laravel 6 turns PHP 8 deprecation notices into fatal errors, so exclude them
+RUN sed -i 's#"doctrine/dbal": "2.6"#"doctrine/dbal": "^2.13"#' composer.json && \
+    php /bin/composer.phar update doctrine/dbal nesbot/carbon --with-dependencies --ignore-platform-reqs --no-plugins --no-scripts && \
+    sed -i 's/error_reporting(-1)/error_reporting(E_ALL \& ~E_DEPRECATED \& ~E_USER_DEPRECATED)/' vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/HandleExceptions.php && \
+    php /bin/composer.phar install --ignore-platform-reqs --no-plugins && \
     rm -rf bootstrap/cache/*
 
 USER root
 RUN chmod g+rwx /var/run/nginx.pid && \
-    chmod -R g+rw /var/www /usr/share/nginx/cache /var/cache/nginx /var/lib/nginx/ /etc/php7/php-fpm.d storage
+    chmod -R g+rw /var/www /usr/share/nginx/cache /var/cache/nginx /var/lib/nginx/ /etc/php83/php-fpm.d storage
 USER 1001
